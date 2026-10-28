@@ -7,6 +7,36 @@
 - path-style 주소(`http://host:port/{bucket}/{key}`)만 지원
 - 인증 없음 (SigV4 서명을 검증하지 않음)
 
+## 배경
+
+이 프로젝트는 다음과 같은 상황에서 출발했다.
+
+- 운영 환경의 런타임이 **Java 8** 로 고정되어 있어, 최신 JDK를 요구하는 도구나 MinIO 같은 별도 서버 제품을 들이기 어렵다.
+- **Object Storage(S3, Ceph, MinIO 등)가 없다.** 데이터는 서버의 로컬 디스크(또는 NFS 마운트)에 일반 파일로만 존재한다.
+- 그런데 사용하는 애플리케이션·도구는 **S3 호환 API** 로만 데이터를 읽을 수 있다.
+
+### 예시
+
+배치 서버의 `/data/s3/reports/2026/10/sales.csv` 에 매일 생성되는 리포트 파일이 있다고 하자.
+분석 도구와 Python 스크립트(boto3)는 데이터 소스를 `s3://reports/2026/10/sales.csv` 형태로만 받는다.
+Object Storage를 새로 도입하고 파일을 업로드·동기화하는 파이프라인을 만드는 것은 이 목적에 비해 과하다.
+
+이 게이트웨이를 쓰면 파일을 옮기거나 복제하지 않고 같은 디스크를 그대로 S3 API로 노출할 수 있다.
+
+```
+/data/s3/                            S3 API
+└── reports/             ──────▶     버킷  reports
+    └── 2026/10/sales.csv            키    2026/10/sales.csv
+```
+
+```bash
+java S3GetObjectServer 9000 /data/s3
+aws --endpoint-url http://localhost:9000 s3 cp s3://reports/2026/10/sales.csv .
+```
+
+기존 도구는 `endpoint_url` 만 바꾸면 되고, 파일은 계속 평소처럼 디스크에 쓰면 된다.
+읽기 전용(GET/HEAD/ListObjectsV2)만 필요하다는 점을 이용해, 구현을 JDK 내장 `HttpServer` 위의 **단일 Java 파일** 로 최소화했다. 빌드 도구나 라이브러리 없이 `javac` 한 번이면 Java 8 환경에서 바로 동작한다.
+
 ## 디렉터리 구조
 
 ```
